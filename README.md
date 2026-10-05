@@ -259,6 +259,12 @@ NVMe-oF also uses the `volblocksize` parameter above. DH-CHAP authentication is 
 | `encryption.key` | Hex-encoded key (64 chars) | string |
 | `encryption.generateKey` | Auto-generate key | `true`, `false` |
 
+### iSCSI staging on busy nodes
+
+`csi-lib-iscsi` kills every `iscsiadm` call after 3 seconds, and open-iscsi guards its node database with a lock file (`/run/lock/iscsi/lock.write`). A burst of concurrent stage or unstage calls (a node drain, a rollout, many pods restarting) used to queue past that limit, kill the call holding the lock and leave the file behind, after which every later call on the node timed out until a reboot.
+
+The node plugin now runs `iscsiadm` work for staging and unstaging one sequence at a time per node, and removes a `lock.write` older than 20 seconds before each sequence. The lock is found through `/host/proc/1/root/run/lock/iscsi/lock.write`; set `TRUENAS_ISCSI_DB_LOCK_PATH` on the node container if the host keeps it elsewhere.
+
 ## Examples
 
 See the [`examples/`](examples/) folder for sample configurations:

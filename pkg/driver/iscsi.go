@@ -44,6 +44,9 @@ const (
 	mountOptionBind   = "bind"
 )
 
+// iscsiConnect logs in to a target and returns its device path. Overridable in tests.
+var iscsiConnect = iscsilib.Connect
+
 // connectorDir holds the per-volume connector files for iSCSI and NVMe-oF. It must
 // be backed by a host path in the node plugin's pod spec: it records which protocol
 // and target each staged volume uses, and NodeUnstageVolume gets no publish context
@@ -195,7 +198,12 @@ func (h *ISCSIHandler) Stage(ctx context.Context, req *StageRequest) (*StageResu
 
 	// Connect to iSCSI target
 	h.log.V(LogLevelDebug).Info("Connecting to iSCSI target", "portal", config.TargetPortal, "iqn", config.TargetIQN, "lun", config.LUN)
-	devicePath, err := iscsilib.Connect(*connector)
+	var devicePath string
+	err = runISCSIAdm(ctx, h.log, "staging "+req.VolumeID, func() error {
+		var connectErr error
+		devicePath, connectErr = iscsiConnect(*connector)
+		return connectErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to iSCSI target %s at %s: %w", config.TargetIQN, config.TargetPortal, withCommandOutput(err))
 	}
@@ -317,7 +325,10 @@ func (h *ISCSIHandler) cleanupISCSISession(volumeID string) error {
 	}
 
 	if connector != nil && connector.TargetIqn != "" {
-		if err := logoutISCSITarget(connector.TargetIqn, connector.TargetPortals); err != nil {
+		err := runISCSIAdm(context.Background(), h.log, "unstaging "+volumeID, func() error {
+			return logoutISCSITarget(connector.TargetIqn, connector.TargetPortals)
+		})
+		if err != nil {
 			return fmt.Errorf("failed to log out of iSCSI target %s: %w", connector.TargetIqn, err)
 		}
 		h.log.V(LogLevelDebug).Info("Disconnected from iSCSI target", "targetIqn", connector.TargetIqn)
